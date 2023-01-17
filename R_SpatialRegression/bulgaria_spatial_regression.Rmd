@@ -1,0 +1,335 @@
+---
+title: "Exploring Bulgarian Districts and Whether They Exhibit Spatial Spillovers"
+author: "Milena Atanasova"
+output:
+  html_document:
+    df_print: paged
+---
+
+### Read and explore the data
+
+```{r}
+library(spdep); library(sf); library(tmap); library(leaflet)
+```
+
+```{r}
+bulgaria <- st_read("C:\\Users\\User\\Documents\\UNITN\\Geospatial\\For_GITHUB_project\\Plovdiv_Infographics\\Data\\Climate\\gdf_bg_climateinfo.geojson")
+plot(st_geometry(bulgaria))
+
+dim(bulgaria)
+names(bulgaria)
+str(bulgaria)
+head(bulgaria)
+```
+
+# Creating spatial weights matrices 
+
+Define the neighbourhood relationships among the spatial units. There are differnet methods 
+in which a weight matrix can be defined. Below are shown some examples.
+
+```{r}
+# Spatial neighbors
+coords <- st_centroid(st_geometry(bulgaria)) #unique reference spatial coordinate
+plot(st_geometry(bulgaria), border="blue") 
+plot(coords, add = TRUE)
+
+# For Sofia, as its shape is particular, the centroid is very close to the border with the region of Sofia capital.
+```
+
+## Defining neighbors
+
+#### 1.KNN
+```{r}
+knn1BG <- knn2nb(knearneigh(coords,k=1))
+plot(st_geometry(bulgaria), border="grey") 
+plot(knn1BG, coords, add=TRUE)
+```
+
+#### 2.Critical cut-off neighborhood
+
+```{r}
+#minimum threshold distance
+knn1IT <- knn2nb(knearneigh(coords,k=1))
+all.linkedT <- max(unlist(nbdists(knn1IT, coords))) 
+all.linkedT
+
+dnb75 <- dnearneigh(coords, 0, 75); dnb75
+dnb100 <- dnearneigh(coords, 0, 100); dnb100
+
+plot(st_geometry(bulgaria), border="grey")
+plot(dnb75, coords, add=TRUE, col="blue")
+plot(dnb100, coords, add=TRUE, col="red")
+
+```
+
+#### 3.Contiguity-based neighbourhood
+
+```{r}
+# if share a common boundary
+
+contnb_q <- poly2nb(bulgaria, queen=T)
+contnb_q
+plot(st_geometry(bulgaria), border="grey") 
+plot(contnb_q, coords, add=TRUE)
+
+```
+
+
+### Defining spatial weights
+
+```{r}
+dnb75.listw <- nb2listw(dnb75,style="W") #form of a list
+dnb100.listw <- nb2listw(dnb100,style="W")
+listw2mat(dnb75.listw)
+```
+
+### Building free-form spatial weight matrices 
+
+```{r}
+#weights as inverse functions of the distance among centroids
+distM <- st_distance(coords)/1000
+class(distM) <- "matrix" #distance matrix
+distM
+# Three possible weight matrices
+#using inverse functions of the matrices
+W1 <- 1/(1+distM); diag(W1) <- 0
+W2 <- 1/(1+distM^2); diag(W2) <- 0
+W3 <- exp(0.1*-distM);diag(W3) <- 0
+
+#Row-standardize them 
+W1s <- W1/rowSums(W1) 
+W2s <- W2/rowSums(W2) 
+W3s <- W3/rowSums(W3) 
+#convert
+listW1s <- mat2listw(W1s)
+listW2s <- mat2listw(W2s)
+listW3s <- mat2listw(W3s)
+```
+
+
+# The Moran's I test of spatial autocorrelation 
+(a global measure)
+
+First, let's merge data from the Bulgarian Statistical Institute as well.
+```{r}
+library(readxl)
+bgstats <- read_excel("C:\\Users\\User\\Documents\\UNITN\\Geospatial\\For_GITHUB_project\\R_SpatialRegression\\BG_statistics.xlsx")
+colnames(bgstats)[1] = "NAME_LATN"
+prov <- merge(bulgaria, bgstats, by="NAME_LATN")
+head(prov)
+```
+
+Below are some plots of several variables.
+
+```{r}
+
+plot(prov[c("HealthEstablishments")], main="Health Establishments") 
+
+tm_shape(prov) + 
+  tm_polygons("AccommodationEstablishments", title = "Accommodation Establishments") +
+  tm_layout(legend.outside = TRUE) 
+
+tm_shape(prov) + 
+  tm_polygons("temperature_average", title = "Temperature") +
+  tm_layout(legend.outside = TRUE) 
+
+require(RColorBrewer)
+qpal <- colorQuantile("OrRd", prov$GDPmlnbg, n=9) 
+leaflet(prov) %>%
+  addPolygons(stroke = FALSE, fillOpacity = .8, smoothFactor = 0.2, color = ~qpal(GDPmlnbg)) %>%
+  addTiles()
+
+```
+
+
+## Moran's test
+
+Trying different variables, but it appears that p-values are quite high, so it seems that Spatial autocorrelation of the variables is not statistically significant.
+
+```{r}
+# GDP
+moran.mc(prov$GDPmlnbg, dnb75.listw, nsim = 999) 
+
+#Temperature, try a different matrix
+moran.test(prov$temperature_average, dnb100.listw, randomisation = TRUE)
+moran.mc(prov$temperature_average, listW1s, nsim=999)
+
+
+moran.test(prov$precipitation_average, dnb100.listw, randomisation = TRUE)
+moran.mc(prov$precipitation_average, listW1s, nsim=999)
+
+moran.test(prov$GeneratedMunicipalWaste, dnb100.listw, randomisation = TRUE)
+moran.mc(prov$GeneratedMunicipalWaste, listW1s, nsim=999)
+
+moran.mc(prov$wind_speed_average, listW1s, nsim=999)
+
+```
+
+
+
+### The Moran's I test of spatial autocorrelation in OLS residuals of a linear regression model
+
+```{r}
+Lm1 <- lm(temperature_average ~ precipitation_average + wind_speed_average, prov)
+summary(Lm1) 
+
+#plot of the studentized residuals
+prov$studres <- rstudent(Lm1)
+qpal <- colorQuantile("OrRd", prov$studres, n=4) 
+leaflet(prov) %>%
+  addPolygons(stroke = FALSE, fillOpacity = .8, smoothFactor = 0.2, color = ~qpal(studres)) %>%
+  addTiles() 
+
+#There can be seen some similarities in the residuals in some regions which are close next to each other.
+
+```
+
+```{r}
+#Applying the Moran's I test in the OLS residuals 
+lm.morantest(Lm1,dnb100.listw,resfun=rstudent)
+lm.morantest(Lm1,listW1s,resfun=rstudent)
+```
+
+Again not really significant even though a bit lower p-values.
+
+
+```{r}
+library(boot)
+Lm1.lmx <- lm(temperature_average ~ precipitation_average + wind_speed_average, data = prov, x = TRUE)
+MoraneI.boot <- function(var, i, ...) {
+  var <- var[i]
+  lmres <- lm(var ~ Lm1.lmx$x - 1)
+  return(moran(x=residuals(lmres), ...)$I)	  
+}
+boot1 <- boot(residuals(Lm1.lmx),statistic=MoraneI.boot,  
+                R=999, sim="permutation", listw=listW1s,  
+                n=length(listW1s$neighbours), S0=Szero(listW1s))
+ti <- (boot1$t0 - mean(boot1$t))/sqrt(var(boot1$t))  
+boot1
+plot(boot1)
+# We can see there is some pattern in the residuals, they don't follow the quantiles excatly
+#But still not too far off
+```
+
+
+# Local Moran I and test
+(local spatial clusters)
+
+## 1. Moran scatterplot 
+
+```{r}
+#GDP
+mplot <- moran.plot(prov$GDPmlnbg, listw=dnb75.listw, main="Moran scatterplot GDP")
+# Since the pattern of Sofia is particular it is way far off, it is difficult to make inference
+
+mplot <- moran.plot(prov$temperature_average, listw=listW1s, main="Moran scatterplot Temperature")
+grid()
+```
+
+From the plot some things could be pointed out:
+There seem to be some division in the four quadrants;
+Higher temperature seems to be associated with lower local average.
+Sofia and Blagoevgrad exert the most influence on the regression line.
+
+```{r}
+prov$hat_value <- mplot$hat
+tm_shape(prov) + tm_polygons("hat_value") 
+```
+
+Below, the most influencial units.
+
+```{r}
+
+mplot <- moran.plot(prov$temperature_average, listw=listW1s, main="Moran scatterplot", 
+         return_df=F)
+hotspot <- as.numeric(row.names(as.data.frame(summary(mplot))))
+
+prov$wx <- lag.listw(listW1s, prov$temperature_average)
+
+prov$quadrant <- rep("None", length(prov$temperature_average))
+for(i in 1:length(hotspot))  {
+  if (prov$temperature_average[hotspot[i]]>mean(prov$temperature_average) & prov$wx[hotspot[i]]> mean(prov$wx)) 
+        prov$quadrant[hotspot[i]] <- "HH" 
+  if (prov$temperature_average[hotspot[i]]>mean(prov$temperature_average) & prov$wx[hotspot[i]]< mean(prov$wx)) 
+        prov$quadrant[hotspot[i]] <- "HL" 
+  if (prov$temperature_average[hotspot[i]]<mean(prov$temperature_average) & prov$wx[hotspot[i]]<mean(prov$wx)) 
+        prov$quadrant[hotspot[i]] <- "LL" 
+  if (prov$temperature_average[hotspot[i]]<mean(prov$temperature_average) & prov$wx[hotspot[i]]>mean(prov$wx)) 
+        prov$quadrant[hotspot[i]] <- "LH" 
+  }
+table(prov$quadrant)
+
+#which allows us to plot the map of the regions with influence by typing
+tm_shape(prov) + tm_polygons("quadrant")
+```
+
+
+# 2. The Local Moran's I values
+
+```{r}
+lmI <- localmoran(prov$temperature_average, listW1s)
+head(lmI)
+prov$lmI <- lmI[,1]
+tm_shape(prov) + 
+    tm_polygons("lmI", title = "Local Moran's I values") 
+
+# We can see some of the local regions that are being identified
+```
+
+```{r}
+lmIp1 <- localmoran_perm(prov$temperature_average, listW1s, nsim = 9999, iseed = 1) 
+lmIp2 <- localmoran_perm(prov$GDPmlnbg, listW1s, nsim = 9999, iseed = 1)
+
+#Things do not seem significant.
+```
+
+
+
+# Spatial regression
+
+Let's see if there exists the need to include spatial characteristics when
+computing models.
+
+```{r}
+library(spatialreg)
+```
+
+```{r}
+#The Lagrange multiplier (LM) test of spatial dependence on OLS residuals
+
+Lm1 <- lm(temperature_average ~ precipitation_average + wind_speed_average, prov)
+natOLSlmTests <- lm.LMtests(Lm1, dnb100.listw, 
+                    test=c("LMerr", "LMlag", "RLMerr", "RLMlag"))
+summary(natOLSlmTests)
+
+```
+
+After having tried with different weight matrices, it seems there is no presence of
+importance of the spatial distribution for the model about average temperature.
+
+
+```{r}
+#Also for the GDP not preferred any other models which consider the spatial autocorrelation
+
+Lm2 <- lm(GDPmlnbg ~ Area + PublicWaterSupply + GeneratedMunicipalWaste + AccommodationEstablishments, prov)
+natOLSlmTests <- lm.LMtests(Lm2, dnb100.listw, 
+                    test=c("LMerr", "LMlag", "RLMerr", "RLMlag"))
+summary(natOLSlmTests)
+
+```
+
+From the analysis conducted, it appears that overall in Bulgarian districts, 
+the geographical location does not play a big role for some statistical indicators.
+The local/global effects cannot be seen, and in fact since the main and most developed
+cities of the country are more or less scattered around the country, it makes sense.
+
+Therefore, if regression is to be done on some factor concerning the variables at hand,
+it can be relied on linear regression models with OLS estimator.
+
+There could be some other indicator variables for the country, which could possibly 
+possess the need to be analysed with the use of a spatial regression model.
+
+In fact, maybe if analysis is done based on municipalities, some more useful and informative
+results could be obtained. However, not much data of this kind is available.
+
+
