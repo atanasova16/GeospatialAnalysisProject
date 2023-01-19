@@ -6,7 +6,7 @@ A project for the course of Geospatial Analysis and Representation at the Univer
 
 The project is organized as follows.
 
-The file **GeospatialAnalysisReport.pdf** is a summary paper of the analysis and results obtained, with visualizations of maps and diagrams.
+The file **GeospatialAnalysisReport.pdf** is a brief summary paper of the analysis and results obtained, with visualizations of maps and diagrams.
 
 In the **Analysis and Exploration** folder is the material about the analysis of climate variables and the one of the city of Plovdiv with Python, containing the /code and /data folders. 
 
