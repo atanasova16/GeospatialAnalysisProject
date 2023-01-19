@@ -18,6 +18,6 @@ Data is subdivided into the different sources used for different purposes.
 - CLimate has some modified WorldCLim data (Under Creative Commons Attribution-ShareAlike 4.0 International License) https://worldclim.org/data/worldclim21.html
 - Hydrobasins comes from AQUASTAT (FAO) (under Creative Commons Attribution-NonCommercial-ShareAlike 3.0 IGO) https://data.apps.fao.org/catalog/iso/1849e279-67bd-4e6f-a789-9918925a11a1 
 
-Code contains the executable notebooks representing all the analysis.
+Code contains the executable notebooks representing all the analysis, divided by the function.
 
 In the **Spatial Regression** folder, there is the file with statistical indicators of Bulgaria with data from the National Statistical Institute. The .rmd file instead contains the R analysis of the districts.
